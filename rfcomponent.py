@@ -6,7 +6,7 @@ from yfactor import dBm_to_W
 import numpy as np
 
 class Component():
-	def __init__(self, fspace, navg):
+	def __init__(self, fspace, navg, T_physical=290):
 		self.fspace = fspace
 		self.nf = None
 		self.Teq = None
@@ -14,6 +14,7 @@ class Component():
 		self.oip3 = []
 		self.iip3 = []
 		self.navg = navg
+		self.Tp = T_physical
 		# components default to resistive so lossy components will 
 		# automatically have noise figure set appropriately based on gain
 		self.resistive = True
@@ -21,6 +22,11 @@ class Component():
 	def setNF(self, fpoints, nfpoints):
 		self.nf = np.interp(self.fspace, fpoints, nfpoints)
 		self.Teq = (10**(self.nf/10)-1)*290
+		self.resistive = False
+		
+	def setTeq(self, fpoints, Tpoints):
+		self.Teq = np.interp(self.fspace, fpoints, Tpoints)
+		self.nf = 10*np.log10(1 + self.Teq/290)
 		self.resistive = False
 		
 	# calculate noise figure with simple y-factor method (no instrument calibration)
@@ -162,8 +168,8 @@ class Component():
 		
 		# update NF
 		if self.resistive == True:
-			self.nf = -self.gain
-			self.Teq = (10**(self.nf/10)-1)*290
+			self.Teq = (10**(-self.gain/10)-1)*self.Tp
+			self.nf = 10*np.log10(1 + self.Teq/290)
 		
 		# update IP3
 		if len(self.oip3) != 0:
@@ -179,8 +185,8 @@ class Component():
 		
 		# update NF
 		if self.resistive == True:
-			self.nf = -self.gain
-			self.Teq = (10**(self.nf/10)-1)*290
+			self.Teq = (10**(-self.gain/10)-1)*self.Tp
+			self.nf = 10*np.log10(1 + self.Teq/290)
 		
 		# update IP3
 		if len(self.oip3) != 0:
@@ -196,8 +202,8 @@ class Component():
 		
 		# update NF
 		if self.resistive:
-			self.nf = -self.gain
-			self.Teq = (10**(self.nf/10)-1)*290
+			self.Teq = (10**(-self.gain/10)-1)*self.Tp
+			self.nf = 10*np.log10(1 + self.Teq/290)
 		
 		# update IP3
 		if len(self.oip3) != 0:
@@ -213,8 +219,8 @@ class Component():
 		
 		# update NF
 		if self.resistive == True:
-			self.nf = -self.gain
-			self.Teq = (10**(self.nf/10)-1)*290
+			self.Teq = (10**(-self.gain/10)-1)*self.Tp
+			self.nf = 10*np.log10(1 + self.Teq/290)
 		
 		# update IP3
 		if len(self.oip3) != 0:
@@ -231,3 +237,33 @@ class Component():
 		t = int((malen-1)/2)
 		dataf = dataf[t:-t]
 		return dataf, t
+
+class Chain():
+	def __init__(self, comp_list):
+		self.components = comp_list
+		self.Teq = 0
+		self.G = 0
+		self.NF = None
+		self.IIP3 = None
+		self.OIP3 = None
+		self.name = ''
+	
+	def calcCascade(self):
+		oip3_hi = 100	# number to use for linear components (dBm)
+		iip3_w = 10**((oip3_hi-30)/10)
+		
+		for c in self.components:
+			self.Teq = self.Teq + c.Teq/(10**(self.G/10))
+			if len(c.oip3) == 0:
+				c_oip3 = oip3_hi
+			else:
+				c_oip3 = c.oip3
+			iip3_w = 1/(1/iip3_w + 10**((self.G-(c_oip3-30-c.gain))/10))
+			self.G = self.G + c.gain
+			#print(self.T_eq[0])
+		
+		# convert iip3 to dBm
+		self.IIP3 = 10*np.log10(1000*iip3_w)
+		self.OIP3 = self.IIP3 + self.G
+		
+		self.NF = 10*np.log10(self.Teq/290 + 1)
