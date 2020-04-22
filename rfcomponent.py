@@ -4,6 +4,7 @@ import yfactor as yf
 import vna_import as vna
 from yfactor import dBm_to_W
 import numpy as np
+from numpy.fft import fft, fftshift
 
 class Component():
 	def __init__(self, fspace, navg, T_physical=290):
@@ -164,6 +165,11 @@ class Component():
 			self.iip3 = self.oip3 - self.gain
 	
 	def setGain(self, fpoints, gainpoints):
+		# allow calling with just one gain value for the whole range
+		if len(np.shape(gainpoints)) == 0:
+			fpoints = [self.fspace[0]]
+			gainpoints = [gainpoints]
+			
 		self.gain = np.interp(self.fspace, fpoints, gainpoints)
 		
 		# update NF
@@ -244,8 +250,8 @@ class Chain():
 		self.Teq = 0
 		self.G = 0
 		self.NF = None
-		self.IIP3 = None
-		self.OIP3 = None
+		self.IIP3 = []
+		self.OIP3 = []
 		self.name = ''
 	
 	def calcCascade(self):
@@ -267,3 +273,58 @@ class Chain():
 		self.OIP3 = self.IIP3 + self.G
 		
 		self.NF = 10*np.log10(self.Teq/290 + 1)
+		
+	def timeDomainResponse(self, t, vin):
+		if len(self.OIP3) == 0:
+			self.calcCascade()
+				
+		# calculate power series gain coefficients from gain / OIP3
+		
+		# for now, use the worst case OIP3
+		# TODO: take into account the OIP3 varying over frequency
+		roi = (np.where((self.components[0].fspace >= 1300) & (self.components[0].fspace <= 1720)))[0]
+		oip3 = min(self.OIP3[roi])
+		gain = min(self.G[roi])
+		
+		print('OIP3: ', oip3)
+		print('gain: ', gain)
+		
+		Z0 = 50
+		a1 = 10**(gain/20)
+		a3 = -2*a1**3/(3*Z0*yf.dBm_to_W(oip3))
+		
+		# calculate nonlinear response
+		dt = min(np.diff(t))
+		Fs = 1/dt
+		NFFT = len(vin)		
+		fmin = -1/(2*dt)
+		fmax = 1/(2*dt)
+		f = np.linspace(0, fmax, int(NFFT/2))
+		df = Fs/NFFT
+
+		S_in = psd_1sided(vin, Fs, NFFT)
+		S_in = S_in[int(len(vin)/2):]
+		
+		p_tot = sum(S_in) * df
+		p_tot_dbm = 10*np.log10(1000*p_tot)
+		print("total input power (dBm): ", p_tot_dbm)
+		
+		vout = a1*vin + a3*vin**3
+		S_out = psd_1sided(vout, Fs, NFFT)
+		S_out = S_out[int(len(vin)/2):]
+		
+		peak_psd = 10*np.log10(1000*max(S_out))
+		p_tot = sum(S_out) * df
+		p_tot_dbm = 10*np.log10(1000*p_tot)
+		print("total output power (dBm): ", p_tot_dbm)
+		
+		return f, S_out, S_in
+		
+def psd_1sided(vt, Fs, NFFT):
+	# window
+	win = np.ones(len(vt))
+	S = sum(win**2)	# scaling factor to account for window
+	dft = fftshift(fft(vt*win, NFFT))
+	p = 2/(50*S*Fs)*np.abs(dft)**2 # factor of 2 is to include power at negative frequencies
+	
+	return p
