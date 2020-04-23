@@ -5,9 +5,10 @@ import vna_import as vna
 from yfactor import dBm_to_W
 import numpy as np
 from numpy.fft import fft, fftshift
+from matplotlib import pyplot as plt
 
 class Component():
-	def __init__(self, fspace, navg, T_physical=290):
+	def __init__(self, fspace, navg, name='', T_physical=290):
 		self.fspace = fspace
 		self.nf = None
 		self.Teq = None
@@ -15,6 +16,7 @@ class Component():
 		self.oip3 = []
 		self.iip3 = []
 		self.navg = navg
+		self.name = name
 		self.Tp = T_physical
 		# components default to resistive so lossy components will 
 		# automatically have noise figure set appropriately based on gain
@@ -273,6 +275,19 @@ class Chain():
 		self.OIP3 = self.IIP3 + self.G
 		
 		self.NF = 10*np.log10(self.Teq/290 + 1)
+	
+	# plot gains for all named components
+	def plotGains(self):
+		plt.figure()
+		plt.rc('lines', linewidth=1)
+		plt.title(self.name + ' components')
+		plt.ylabel('Gain (dB)')
+		plt.xlabel('Frequency (MHz)')
+		for c in self.components:
+			if c.name != '':
+				plt.plot(c.fspace, c.gain, label=c.name)
+		plt.legend()
+		plt.grid()
 		
 	def timeDomainResponse(self, t, vin):
 		if len(self.OIP3) == 0:
