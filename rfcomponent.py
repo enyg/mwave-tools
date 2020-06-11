@@ -1,5 +1,4 @@
 #import sys
-#sys.path.insert(1, '/home/erich/data/research/RAS/py_modules')
 import yfactor as yf
 import vna_import as vna
 from yfactor import dBm_to_W
