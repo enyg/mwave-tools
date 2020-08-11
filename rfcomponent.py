@@ -1,5 +1,4 @@
 #import sys
-#sys.path.insert(1, '/home/erich/data/research/RAS/py_modules')
 import yfactor as yf
 import vna_import as vna
 from yfactor import dBm_to_W
@@ -283,6 +282,7 @@ class Chain():
 	@nf.setter
 	def nf(self, value):
 		self.NF = value
+
 	
 	def calcCascade(self):
 		oip3_hi = 100	# number to use for linear components (dBm)
@@ -487,6 +487,7 @@ class Chain():
 		if plot:
 			plt.legend(loc='upper right')
 		
+
 		S_out_est = VSDout**2/(2*50) + dBm_to_W(-300)
 		
 		return fnl, S_out_est

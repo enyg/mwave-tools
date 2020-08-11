@@ -58,7 +58,7 @@ def loads2p(f):
 				cols = len(row)-1
 				break
 		nports = int((cols-1)/2)
-		
+	
 		freq = []
 		SP = np.zeros([0,nports])
 		
@@ -76,6 +76,6 @@ def loads2p(f):
 				SP = np.concatenate((SP, sp))
 			#else:
 			#	print(len(row), '!=', cols)
-		
+	
 		freq = np.array(freq)*freq_prefix/1e6
 		return freq, SP
