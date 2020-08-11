@@ -103,7 +103,7 @@ class Component():
 		# import measurement data
 		rbw, f_nf, p_hot = yf.loadcsv(hotfile)
 		_, _, p_cold = yf.loadcsv(coldfile)
-		_, _, cal_hot = yf.loadcsv(hotfile_cal)
+		_, fcal, cal_hot = yf.loadcsv(hotfile_cal)
 		_, _, cal_cold = yf.loadcsv(coldfile_cal)
 		# convert to Watts
 		p_cold = dBm_to_W(p_cold)
@@ -124,6 +124,12 @@ class Component():
 			cal_hot, _ = self.smooth(cal_hot)
 			iploss, _ = self.smooth(iploss)
 			f_nf = f_nf[trim:-trim]
+			fcal = fcal[trim:-trim]
+		
+		# make sure calibration frequency space is the same as DUT measurement
+		if len(fcal) != len(f_nf):
+			cal_cold = np.interp(f_nf, fcal, cal_cold)
+			cal_hot = np.interp(f_nf, fcal, cal_hot)
 		
 		# convert input loss to db
 		iploss = 20*np.log10(iploss)
@@ -184,7 +190,12 @@ class Component():
 			self.iip3 = self.oip3 - self.gain
 			
 	def setGainFile(self, gainfile, column):
-		f1, SP = vna.loadcsv(gainfile)
+		# check if it's an s2p file or csv
+		if gainfile[-4:] == '.s2p' or gainfile[-4:] == '.S2P':
+			f1, SP = vna.loads2p(gainfile)
+		else:
+			f1, SP = vna.loadcsv(gainfile)
+		
 		gain = np.abs(SP[:,column])
 		if self.navg > 1:
 			gain, trim = self.smooth(gain)
@@ -255,10 +266,30 @@ class Chain():
 		self.IIP3 = []
 		self.OIP3 = []
 		self.name = ''
+		self.calcCascade()
+		
+	@property
+	def gain(self):
+		return self.G
+	
+	@gain.setter
+	def gain(self, value):
+		self.G = value
+		
+	@property
+	def nf(self):
+		return self.NF
+	
+	@nf.setter
+	def nf(self, value):
+		self.NF = value
 	
 	def calcCascade(self):
 		oip3_hi = 100	# number to use for linear components (dBm)
 		iip3_w = 10**((oip3_hi-30)/10)
+		
+		self.Teq = 0
+		self.G = 0
 		
 		for c in self.components:
 			self.Teq = self.Teq + c.Teq/(10**(self.G/10))
@@ -280,13 +311,29 @@ class Chain():
 	def plotGains(self):
 		plt.figure()
 		plt.rc('lines', linewidth=1)
-		plt.title(self.name + ' components')
+		plt.title('Gain by component, \n' + self.name)
 		plt.ylabel('Gain (dB)')
 		plt.xlabel('Frequency (MHz)')
 		for c in self.components:
 			if c.name != '':
 				plt.plot(c.fspace, c.gain, label=c.name)
-		plt.plot(self.components[0].fspace, self.G, label='Total gain')
+		plt.plot(self.components[0].fspace, self.G, '--', label='Total gain')
+		plt.legend()
+		plt.grid()
+	
+	def plotTeqs(self):
+		plt.figure()
+		plt.rc('lines', linewidth=1)
+		plt.title('$T_{eq}$ by component, \n' + self.name)
+		plt.ylabel('Cascaded noise temp. (K)')
+		plt.xlabel('Frequency (MHz)')
+		num = 0
+		for c in self.components:
+			num = num + 1
+			if c.name != '':
+				partial = Chain(self.components[:num])
+				plt.plot(c.fspace, partial.Teq, label='after '+c.name)
+		plt.plot(self.components[0].fspace, self.Teq, '--', label='Overall $T_{eq}$')
 		plt.legend()
 		plt.grid()
 	
@@ -294,13 +341,13 @@ class Chain():
 	def plotOIP3s(self):
 		plt.figure()
 		plt.rc('lines', linewidth=1)
-		plt.title(self.name + ' components')
+		plt.title('$OIP_3$ by component, \n' + self.name)
 		plt.ylabel('OIP3 (dBm)')
 		plt.xlabel('Frequency (MHz)')
 		for c in self.components:
 			if (c.name != '') and (len(c.oip3) != 0):
 				plt.plot(c.fspace, c.oip3, label=c.name)
-		plt.plot(self.components[0].fspace, self.OIP3, label='Cascaded OIP3')
+		plt.plot(self.components[0].fspace, self.OIP3, '--', label='Cascaded OIP3')
 		plt.legend()
 		plt.grid()
 	
@@ -308,20 +355,220 @@ class Chain():
 	def plotIIP3s(self):
 		plt.figure()
 		plt.rc('lines', linewidth=1)
-		plt.title(self.name + ' components')
+		plt.title('$IIP_3$ by component, \n' + self.name)
 		plt.ylabel('IIP3 (dBm)')
 		plt.xlabel('Frequency (MHz)')
 		for c in self.components:
 			if (c.name != '') and (len(c.oip3) != 0):
 				plt.plot(c.fspace, c.iip3, label=c.name)
-		plt.plot(self.components[0].fspace, self.IIP3, label='Cascaded IIP3')
+		plt.plot(self.components[0].fspace, self.IIP3, '--', label='Cascaded IIP3')
 		plt.legend()
 		plt.grid()
+		
+	# print the noise budget at a single frequency
+	def printBudget(self, freq):
+		print("Noise Budget at " + str(freq) + " MHz:")
+		print(" " + self.name)
+		
+		num = 0
+		for c in self.components:
+			num = num + 1
+			partial = Chain(self.components[:num])
+			
+			gain = str(round(np.interp(freq, c.fspace, c.gain),2))
+			nf = str(round(np.interp(freq, c.fspace, c.nf),2))
+			Teq = str(round(np.interp(freq, c.fspace, c.Teq),2))
+			Tsys = str(round(np.interp(freq, c.fspace, partial.Teq),2))
+			print(" " + c.name + " "*(20-len(c.name)) + gain + " dB      "
+				+ nf + " dB / " + Teq + " K       " 
+				+ str(c.Tp) + " K phys     " 
+				+ Tsys + " K total")
+	
+	# use formulas to estimate rfi intermods (faster than time domain method for large cascades)
+	#def intermodEstimate(self, rfi_freq, rfi_bw, rfi_pow, t):
+	def intermodEstimate(self, rfiList, t):
+				
+		#set up frequency space
+		dt = min(np.diff(t))
+		Fs = 1/dt
+		fmin = -1/(2*dt)
+		fmax = 1/(2*dt)
+		fnl = np.linspace(0, fmax, int(len(t)/2))
+		df = Fs/len(t)
+		
+		rfi_freq = np.zeros(len(rfiList))
+		rfi_bw = np.zeros(len(rfiList))
+		rfi_pow = np.zeros(len(rfiList))
+		for ix in range(len(rfi_freq)):
+			rfi_freq[ix] = rfiList[ix].fc
+			rfi_bw[ix] = rfiList[ix].bw
+			rfi_pow[ix] = rfiList[ix].power
+				
+		rfi_freq = np.concatenate((-np.array(rfi_freq), np.array(rfi_freq)))
+		rfi_bw = np.concatenate((-np.array(rfi_bw), np.array(rfi_bw)))
+		rfi_pow = dBm_to_W(np.array(rfi_pow))
+		rfi_pow = np.concatenate((rfi_pow, rfi_pow))
+		n = len(rfi_freq)
+		
+		# initialize output spectrum (input state)	(1-sided spectrum)
+		VSDout = np.zeros(int(len(t)/2))
+		#S_out_est = np.ones(int(len(t)/2)) * dBm_to_W(-200)
+		# rfi source input power
+		for ix in range(len(rfi_freq)):
+			if rfi_freq[ix] > 0:
+				rng_fund = (np.where((fnl >= rfi_freq[ix]-rfi_bw[ix]/2) & (fnl <= rfi_freq[ix]+rfi_bw[ix]/2)))[0]
+				VSDout[rng_fund] = np.sqrt(2*50*rfi_pow[ix]/np.abs(rfi_bw[ix]))
+				#S_out_est[rng_fund] = rfi_pow[ix]/np.abs(rfi_bw[ix])
+		
+		plot=False
+		if plot:
+			plt.figure()
+			plt.title('component contributions, estimate')
+			
+		for c in self.components:
+			# calculate power series gain coefficients from this component's gain/OIP3
+			a1f = 10**(c.gain/20)
+			
+			# apply gain to whole spectrum in this case
+			# it's ok that this is also affecting the fundamental before that's applied to IM power calculation,
+			# because that calculation is using the array of RFI powers anyway (not the voltage spectrum)
+			a1 = np.interp(fnl, c.fspace*1e6, a1f)
+			VSDout = VSDout*a1
+			
+			if len(c.oip3) == 0:
+				#c_oip3 = oip3_hi
+				a3_est = []	# just set a3 to zero since we're modeling these devices as linear
+				
+				#S_out_est = S_out_est*a1**2
+			else:
+				#c_oip3 = c.oip3
+				a3_est = 2*10**(1.5*c.gain/10)/(3*dBm_to_W(c.oip3)*50)
+
+				a3f = a3_est
+
+				# for every combination of 3 rfi sources
+				for i1 in range(n):
+					for i2 in range(n):
+						for i3 in range(n):
+							# sum frequency
+							fsum = rfi_freq[i1] + rfi_freq[i2] + rfi_freq[i3]
+							# calculate power for positive frequencies
+							if fsum > 0:
+								a3 = np.interp(fsum, c.fspace*1e6, a3f)
+								P = (50/2*a3)**2 * rfi_pow[i1] * rfi_pow[i2] * rfi_pow[i3] 
+								# calculate bandwidth
+								BW = np.abs(rfi_bw[i1] + rfi_bw[i2] + rfi_bw[i3])
+								
+								# modify output spectrum							
+								rng_im = (np.where((fnl >= fsum-BW/2) & (fnl <= fsum+BW/2)))[0]
+								VSDout[rng_im] = VSDout[rng_im] + np.sqrt(2*50*P/BW)
+								#S_out_est[rng_im] = S_out_est[rng_im] + P/np.abs(BW)
+				
+				if plot and (c.name != '') and (len(c.oip3) != 0):
+					Sp = VSDout**2/(2*50) + dBm_to_W(-300)
+					plt.plot(fnl*1e-6, 30+10*np.log10(Sp), '--', label='output after '+c.name)
+					
+				
+				# calculate fundamental gain from this component and update plot
+				# ~ for ix in range(len(rfi_freq)):
+					# ~ if rfi_freq[ix] > 0:
+						# ~ a1 = np.interp(rfi_freq[ix], c.fspace*1e6, a1f)
+						# ~ rng_fund = (np.where((fnl >= rfi_freq[ix]-rfi_bw[ix]/2) & (fnl <= rfi_freq[ix]+rfi_bw[ix]/2)))[0]
+						# ~ VSDout[rng_fund] = VSDout[rng_fund]*a1
+						#S_out_est[rng_fund] = S_out_est[rng_fund]*a1**2
+			
+			# update rfi source power with component gain
+			for ix in range(len(rfi_freq)):	
+				a1 = np.interp(rfi_freq[ix], c.fspace*1e6, a1f)				
+				rfi_pow[ix] = rfi_pow[ix]*a1**2
+			
+		# find peak regions for plotting (max intermod?)
+		
+		if plot:
+			plt.legend(loc='upper right')
+		
+		S_out_est = VSDout**2/(2*50) + dBm_to_W(-300)
+		
+		return fnl, S_out_est
+	
+	# wrapper if you don't need the voltage output
+	def timeDomainStepByStep(self, t, vin):
+		f, S_out, S3, S_in, _ = self.timeDomainStepByStepV(t, vin)
+		return f, S_out, S3, S_in
 	
 	# calculate response of each component separately
-	#def timeDomainStepByStep(self, t, vin):
+	def timeDomainStepByStepV(self, t, vin):
+		fspace = self.components[0].fspace
 		
-	
+		plot = False
+		if plot:
+			plt.figure()
+			plt.title('component nonlinear contributions')
+		
+		#set up frequency space
+		dt = min(np.diff(t))
+		Fs = 1/dt
+		NFFT = len(vin)		
+		fmin = -1/(2*dt)
+		fmax = 1/(2*dt)
+		f = np.linspace(0, fmax, int(NFFT/2))
+		df = Fs/NFFT
+		
+		S_in = psd_1sided(vin, Fs, NFFT)
+		S_in = S_in[int(len(vin)/2):]
+		
+		Vout = vin
+		#v1sum = np.zeros(len(vin))
+		v3sum = np.zeros(len(vin))
+		vout3 = np.zeros(len(vin))
+		
+		oip3_hi = 100	# number to use for linear components (dBm)
+		iip3_w = 10**((oip3_hi-30)/10)
+		
+		for c in self.components:
+			# calculate power series gain coefficients from this component's gain/OIP3
+			a1f = 10**(c.gain/20)
+			
+			if len(c.oip3) == 0:
+				#c_oip3 = oip3_hi
+				a3_est = []	# just set a3 to zero since we're modeling these devices as linear
+			else:
+				#c_oip3 = c.oip3
+				a3_est = 2*10**(1.5*c.gain/10)/(3*dBm_to_W(c.oip3)*50)
+			
+			a3f = a3_est
+			
+			# Vout is fed back in to the next component
+			vout1, vout3 = timeDomainVoltage(Vout, a1f, a3f, Fs, fspace)
+			
+			Vout = vout1 + vout3
+			#v1sum = v1sum + vout1
+			v3sum = v3sum + vout3
+			
+			S3 = psd_1sided(vout3, Fs, NFFT)
+			S3 = S3[int(len(vin)/2):]
+			
+			S1 = psd_1sided(vout1, Fs, NFFT)
+			S1 = S1[int(len(vin)/2):]
+			
+			if plot and (c.name != '') and (len(c.oip3) != 0):
+				plt.plot(f*1e-6, 30+10*np.log10(S3), ':', label='3rd order (after '+c.name+')')
+				plt.plot(f*1e-6, 30+10*np.log10(S1), label='linear (after '+c.name+')')
+		
+		if plot:
+			plt.plot(f*1e-6, 30+10*np.log10(S_in), label='input')
+			plt.legend(loc="upper right")
+			plt.xlabel("frequency (MHz)")
+			plt.ylabel("dBm/Hz")
+		
+		S_out = psd_1sided(Vout, Fs, NFFT)
+		S_out = S_out[int(len(vin)/2):]
+		
+		S3 = psd_1sided(v3sum, Fs, NFFT)
+		S3 = S3[int(len(vin)/2):]
+		
+		return f, S_out, S3, S_in, Vout
+			
 	# frequency dependent gain and a3
 	def timeDomainResponse(self, t, vin):
 		if len(self.OIP3) == 0:
@@ -335,8 +582,6 @@ class Chain():
 		# TODO: use direct a3 measurements if available
 		a3_est = 2*10**(1.5*self.G/10)/(3*dBm_to_W(self.OIP3)*50)
 		a3f = a3_est
-		
-		#roi = (np.where((self.components[0].fspace >= 1300) & (self.components[0].fspace <= 1720)))[0]
 		
 		# calculate nonlinear response
 		dt = min(np.diff(t))
@@ -354,26 +599,7 @@ class Chain():
 		p_tot_dbm = 10*np.log10(1000*p_tot)
 		print("total input power (dBm): ", p_tot_dbm)
 		
-		# linear output term
-		vin_f = fft(vin)
-		ff = fftfreq(len(vin)) # in cycles/sample?
-		ff = Fs*ff	# convert to cycles/sec
-		fpos = np.arange(0,int(len(vin)/2)+1)
-		fneg = np.arange(int(len(vin)/2)+1,len(vin))	# not sure about these
-		# interpolate a1(f) to positive frequency space of fft
-		A1fp = np.interp(ff[fpos], fspace*1e6, a1f)
-		A1fn = np.interp(ff[fneg], -np.flip(fspace)*1e6, np.flip(a1f))
-		A1f = np.concatenate((A1fp, A1fn))
-		vout1 = ifft(vin_f*A1f)
-		
-		# compute ifft of a3(f) to convolve with vin^3
-		A3fp = np.interp(ff[fpos], fspace*1e6, a3f)
-		A3fn = np.interp(ff[fneg], -np.flip(fspace)*1e6, np.flip(a3f))
-		A3f = np.concatenate((A3fp, A3fn))
-		a3t = ifft(A3f)
-		# this is inefficient because it's doing the fft(ifft(b)), so I could do real(ifft(fft(vin**3)*A3f)) instead
-		# circular convolution because this is discrete (I think that's the reason) and we need valid values over the whole spectrum
-		vout3 = conv_circ(a3t, vin**3)
+		vout1, vout3 = timeDomainVoltage(vin, a1f, a3f, Fs, fspace)
 		
 		## debug:
 		# ~ plt.figure()
@@ -401,7 +627,7 @@ class Chain():
 		# ~ plt.plot(f, 30+10*np.log10(S3), label='3rd order output psd')
 		# ~ plt.legend()
 		
-		plt.show()
+		#plt.show()
 		
 		# sum 1st and 3rd order outputs
 		vout = vout1 + vout3
@@ -428,8 +654,8 @@ class Chain():
 		oip3 = min(self.OIP3[roi])
 		gain = min(self.G[roi])
 		
-		print('OIP3: ', oip3)
-		print('gain: ', gain)
+		print('worst case OIP3: ', oip3)
+		print('worst case gain: ', gain)
 		
 		Z0 = 50
 		a1 = 10**(gain/20)
@@ -451,21 +677,51 @@ class Chain():
 		p_tot_dbm = 10*np.log10(1000*p_tot)
 		print("total input power (dBm): ", p_tot_dbm)
 		
-		vout = a1*vin + a3*vin**3
+		vout3 = a3*vin**3
+		
+		vout = a1*vin + vout3
 		S_out = psd_1sided(vout, Fs, NFFT)
 		S_out = S_out[int(len(vin)/2):]
+		
+		S3 = psd_1sided(vout3, Fs, NFFT)
+		S3 = S3[int(len(vin)/2):]
 		
 		peak_psd = 10*np.log10(1000*max(S_out))
 		p_tot = sum(S_out) * df
 		p_tot_dbm = 10*np.log10(1000*p_tot)
 		print("total output power (dBm): ", p_tot_dbm)
 		
-		return f, S_out, S_in
+		return f, S_out, S3, S_in
 
-def timeDomainVoltage(t, vin):
-	vout = vin
+def timeDomainVoltage(vin, a1f, a3f, Fs, fspace):
+	# linear output term
+	vin_f = fft(vin)
+	ff = fftfreq(len(vin)) # in cycles/sample?
+	ff = Fs*ff	# convert to cycles/sec
+	fpos = np.arange(0,int(len(vin)/2)+1)
+	fneg = np.arange(int(len(vin)/2)+1,len(vin))	# not sure about these
+	# interpolate a1(f) to positive frequency space of fft
+	A1fp = np.interp(ff[fpos], fspace*1e6, a1f)
+	A1fn = np.interp(ff[fneg], -np.flip(fspace)*1e6, np.flip(a1f))
+	A1f = np.concatenate((A1fp, A1fn))
+	vout1 = ifft(vin_f*A1f)
 	
-	return vout
+	# save time if this is a linear computation
+	if len(a3f)==0:
+		vout3 = np.zeros(len(vin))
+	else:
+		# compute ifft of a3(f) to convolve with vin^3
+		A3fp = np.interp(ff[fpos], fspace*1e6, a3f)
+		A3fn = np.interp(ff[fneg], -np.flip(fspace)*1e6, np.flip(a3f))
+		A3f = np.concatenate((A3fp, A3fn))
+		
+		# this is inefficient because it's doing the fft(ifft(b)), so I could do real(ifft(fft(vin**3)*A3f)) instead
+		# circular convolution because this is discrete (I think that's the reason) and we need valid values over the whole spectrum
+		#a3t = ifft(A3f)
+		#vout3 = conv_circ(a3t, vin**3)
+		vout3 = np.real(ifft(fft(vin**3)*A3f))
+	
+	return vout1, vout3
 		
 def psd_1sided(vt, Fs, NFFT):
 	# window
