@@ -1,7 +1,7 @@
 # load s-parameter files from VNA in csv format
 
 import numpy as np
-import csv
+import csv, re
 
 def loadcsv(f):
 	with open(f, 'r', encoding='utf-8') as csvfile:
@@ -27,9 +27,11 @@ def loadcsv(f):
 		freq = np.array(freq)/1e6
 		return freq, SP
 
-# reads s2p files that are in real/imag format
+# reads s2p files that are in real/imag format (or dB / angle - but ignore angle)
 def loads2p(f):
 	freq_prefix = 1
+	
+	fmt = ''
 	
 	with open(f, 'r', encoding='utf-8') as s2pfile:
 		s2pReader = csv.reader(s2pfile, delimiter=' ', skipinitialspace=True)
@@ -43,7 +45,11 @@ def loads2p(f):
 						freq_prefix = 1e6
 					if row[1] == 'kHz' or row[1] == 'KHz':
 						freq_prefix = 1e3
-					assert(row[3] == 'RI')
+					if row[3] == 'RI':
+						fmt = 'RI'
+					elif row[3] == 'dB':
+						fmt = 'dB'
+					assert(row[3] == 'RI' or row[3] == 'dB')
 					break
 		
 		# determine number of ports (columns)
@@ -51,18 +57,25 @@ def loads2p(f):
 			if row[1] == 'Freq':
 				cols = len(row)-1
 				break
-		nports = int((cols-1)/2)	
-		
+		nports = int((cols-1)/2)
+	
 		freq = []
 		SP = np.zeros([0,nports])
 		
 		for row in s2pReader:
+			if len(row) == 1:
+				row = re.split('\s', row[0])	# for weird files that don't use spaces
 			if len(row) == cols:
 				freq.append(float(row[0]))
 				sp = np.zeros([1,nports], dtype=complex)
 				for c in range(nports):
-					sp[0,c] = float(row[1+c*2]) + 1j*float(row[2+c*2])
+					if fmt == 'RI':
+						sp[0,c] = float(row[1+c*2]) + 1j*float(row[2+c*2])
+					elif fmt == 'dB':
+						sp[0,c] = 10**(float(row[1+c*2])/20)	# just get the real part for now
 				SP = np.concatenate((SP, sp))
-		
+			#else:
+			#	print(len(row), '!=', cols)
+	
 		freq = np.array(freq)*freq_prefix/1e6
 		return freq, SP

@@ -102,7 +102,7 @@ class Component():
 		# import measurement data
 		rbw, f_nf, p_hot = yf.loadcsv(hotfile)
 		_, _, p_cold = yf.loadcsv(coldfile)
-		_, _, cal_hot = yf.loadcsv(hotfile_cal)
+		_, fcal, cal_hot = yf.loadcsv(hotfile_cal)
 		_, _, cal_cold = yf.loadcsv(coldfile_cal)
 		# convert to Watts
 		p_cold = dBm_to_W(p_cold)
@@ -123,6 +123,12 @@ class Component():
 			cal_hot, _ = self.smooth(cal_hot)
 			iploss, _ = self.smooth(iploss)
 			f_nf = f_nf[trim:-trim]
+			fcal = fcal[trim:-trim]
+		
+		# make sure calibration frequency space is the same as DUT measurement
+		if len(fcal) != len(f_nf):
+			cal_cold = np.interp(f_nf, fcal, cal_cold)
+			cal_hot = np.interp(f_nf, fcal, cal_hot)
 		
 		# convert input loss to db
 		iploss = 20*np.log10(iploss)
@@ -260,6 +266,23 @@ class Chain():
 		self.OIP3 = []
 		self.name = ''
 		self.calcCascade()
+		
+	@property
+	def gain(self):
+		return self.G
+	
+	@gain.setter
+	def gain(self, value):
+		self.G = value
+		
+	@property
+	def nf(self):
+		return self.NF
+	
+	@nf.setter
+	def nf(self, value):
+		self.NF = value
+
 	
 	def calcCascade(self):
 		oip3_hi = 100	# number to use for linear components (dBm)
@@ -362,8 +385,9 @@ class Chain():
 				+ Tsys + " K total")
 	
 	# use formulas to estimate rfi intermods (faster than time domain method for large cascades)
-	def intermodEstimate(self, rfi_freq, rfi_bw, rfi_pow, t):
-		
+	#def intermodEstimate(self, rfi_freq, rfi_bw, rfi_pow, t):
+	def intermodEstimate(self, rfiList, t):
+				
 		#set up frequency space
 		dt = min(np.diff(t))
 		Fs = 1/dt
@@ -372,6 +396,14 @@ class Chain():
 		fnl = np.linspace(0, fmax, int(len(t)/2))
 		df = Fs/len(t)
 		
+		rfi_freq = np.zeros(len(rfiList))
+		rfi_bw = np.zeros(len(rfiList))
+		rfi_pow = np.zeros(len(rfiList))
+		for ix in range(len(rfi_freq)):
+			rfi_freq[ix] = rfiList[ix].fc
+			rfi_bw[ix] = rfiList[ix].bw
+			rfi_pow[ix] = rfiList[ix].power
+				
 		rfi_freq = np.concatenate((-np.array(rfi_freq), np.array(rfi_freq)))
 		rfi_bw = np.concatenate((-np.array(rfi_bw), np.array(rfi_bw)))
 		rfi_pow = dBm_to_W(np.array(rfi_pow))
@@ -455,6 +487,7 @@ class Chain():
 		if plot:
 			plt.legend(loc='upper right')
 		
+
 		S_out_est = VSDout**2/(2*50) + dBm_to_W(-300)
 		
 		return fnl, S_out_est
@@ -682,11 +715,12 @@ def timeDomainVoltage(vin, a1f, a3f, Fs, fspace):
 		A3fp = np.interp(ff[fpos], fspace*1e6, a3f)
 		A3fn = np.interp(ff[fneg], -np.flip(fspace)*1e6, np.flip(a3f))
 		A3f = np.concatenate((A3fp, A3fn))
-		a3t = ifft(A3f)
+		
 		# this is inefficient because it's doing the fft(ifft(b)), so I could do real(ifft(fft(vin**3)*A3f)) instead
 		# circular convolution because this is discrete (I think that's the reason) and we need valid values over the whole spectrum
-		vout3 = np.real(ifft(fft(vin**3)*A3f))
+		#a3t = ifft(A3f)
 		#vout3 = conv_circ(a3t, vin**3)
+		vout3 = np.real(ifft(fft(vin**3)*A3f))
 	
 	return vout1, vout3
 		
