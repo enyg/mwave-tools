@@ -3,7 +3,8 @@ import yfactor as yf
 import vna_import as vna
 from yfactor import dBm_to_W
 import numpy as np
-from numpy.fft import fft, ifft, fftshift, fftfreq
+#from numpy.fft import fft, ifft, fftshift, fftfreq
+from scipy.fftpack import fft, ifft, fftshift, fftfreq
 from matplotlib import pyplot as plt
 
 class Component():
@@ -455,7 +456,7 @@ class Chain():
 				#S_out_est = S_out_est*a1**2
 			else:
 				#c_oip3 = c.oip3
-				a3_est = 2*10**(1.5*c.gain/10)/(3*dBm_to_W(c.oip3)*50)
+				a3_est = -2*10**(1.5*c.gain/10)/(3*dBm_to_W(c.oip3)*50)
 
 				a3f = a3_est
 
@@ -548,7 +549,7 @@ class Chain():
 				a3_est = []	# just set a3 to zero since we're modeling these devices as linear
 			else:
 				#c_oip3 = c.oip3
-				a3_est = 2*10**(1.5*c.gain/10)/(3*dBm_to_W(c.oip3)*50)
+				a3_est = -2*10**(1.5*c.gain/10)/(3*dBm_to_W(c.oip3)*50)
 			
 			a3f = a3_est
 			
@@ -559,13 +560,13 @@ class Chain():
 			#v1sum = v1sum + vout1
 			v3sum = v3sum + vout3
 			
-			S3 = psd_1sided(vout3, Fs, NFFT)
-			S3 = S3[int(len(vin)/2):]
-			
-			S1 = psd_1sided(vout1, Fs, NFFT)
-			S1 = S1[int(len(vin)/2):]
-			
 			if plot and (c.name != '') and (len(c.oip3) != 0):
+				S3 = psd_1sided(vout3, Fs, NFFT)
+				S3 = S3[int(len(vin)/2):]
+			
+				S1 = psd_1sided(vout1, Fs, NFFT)
+				S1 = S1[int(len(vin)/2):]
+			
 				plt.plot(f*1e-6, 30+10*np.log10(S3), ':', label='3rd order (after '+c.name+')')
 				plt.plot(f*1e-6, 30+10*np.log10(S1), label='linear (after '+c.name+')')
 		
@@ -594,7 +595,7 @@ class Chain():
 		
 		a1f = 10**(self.G/20)
 		# TODO: use direct a3 measurements if available
-		a3_est = 2*10**(1.5*self.G/10)/(3*dBm_to_W(self.OIP3)*50)
+		a3_est = -2*10**(1.5*self.G/10)/(3*dBm_to_W(self.OIP3)*50)
 		a3f = a3_est
 		
 		# calculate nonlinear response
