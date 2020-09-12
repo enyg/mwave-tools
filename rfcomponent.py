@@ -170,7 +170,20 @@ class Component():
 		self.oip3 = np.interp(self.fspace, fpoints, oip3points)
 		if len(self.gain) != 0:
 			self.iip3 = self.oip3 - self.gain
-	
+			
+	def setOIP3File(self, oipfile):
+		# csv file needs to be in 3 column format: No., frequency, power(oip3)
+		_, f1, oip3 = yf.loadcsv(oipfile) 
+		
+		# don't smooth oip3 data - it's probably not very fine to begin with
+		print('f1: ', f1)
+		print('oip3: ', oip3)
+		self.oip3 = np.interp(self.fspace, f1, oip3)
+		
+		# set iip3 accordingly, if gain has been set
+		if len(self.gain) != 0:
+			self.iip3 = self.oip3 - self.gain
+		
 	def setGain(self, fpoints, gainpoints):
 		# allow calling with just one gain value for the whole range
 		if len(np.shape(gainpoints)) == 0:
