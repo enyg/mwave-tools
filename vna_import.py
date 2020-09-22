@@ -54,7 +54,7 @@ def loads2p(f):
 		
 		# determine number of ports (columns)
 		for row in s2pReader:
-			if row[1] == 'Freq':
+			if (row[1] == 'Freq') or (row[0] == '!Freq'):
 				cols = len(row)-1
 				break
 		nports = int((cols-1)/2)
@@ -79,3 +79,40 @@ def loads2p(f):
 	
 		freq = np.array(freq)*freq_prefix/1e6
 		return freq, SP
+
+# returns frequncy in MHz and gain in V/V. 
+# fmt can be "RI" or "dB" to match the file format
+# specify column to use for gain (counting 2nd column as 0, frequency is 1st col)
+# (real and imaginary) are grouped as one column for indexing, (dB angle) are grouped as one column also
+def loads2p_generic(f, gain_col, fmt, freq_unit = 'Hz'):
+	freq_prefix = 1
+	freq_col = 0
+	
+	if freq_unit == 'GHz':
+		freq_prefix = 1e9
+	elif freq_unit == 'MHz':
+		freq_prefix = 1e6
+	elif freq_unit == 'kHz' or freq_unit == 'KHz':
+		freq_prefix = 1e3
+	
+	freq = []
+	gain = []
+	
+	with open(f, 'r', encoding='utf-8') as s2pfile:
+		s2pReader = csv.reader(s2pfile, delimiter=' ', skipinitialspace=True)
+		
+		for row in s2pReader:
+			if len(row) == 1:
+				row = re.split('\s', row[0])	# for weird files that don't use spaces
+			# ignore lines that start with text or comments
+			if not (row[0][0] == '!' or row[0][0] == '#'):
+				freq.append(float(row[freq_col]))
+				
+				if fmt == 'RI':
+					newdata = float(row[1+gain_col*2]) + 1j*float(row[2+gain_col*2])
+				elif fmt == 'dB':
+					newdata = 10**(float(row[1+gain_col*2])/20) # this ignores the angle
+				gain.append(newdata)
+				
+		freq = np.array(freq)*freq_prefix/1e6
+		return freq, gain
