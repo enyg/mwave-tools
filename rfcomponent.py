@@ -172,6 +172,11 @@ class Component():
 		if len(self.gain) != 0:
 			self.iip3 = self.oip3 - self.gain
 			
+	def setIIP3(self, fpoints, iip3points):
+		self.iip3 = np.interp(self.fspace, fpoints, iip3points)
+		if len(self.gain) != 0:
+			self.oip3 = self.iip3 + self.gain
+			
 	def setOIP3File(self, oipfile):
 		# csv file needs to be in 3 column format: No., frequency, power(oip3)
 		_, f1, oip3 = yf.loadcsv(oipfile) 
