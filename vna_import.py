@@ -81,10 +81,11 @@ def loads2p(f):
 		return freq, SP
 
 # returns frequncy in MHz and gain in V/V. 
-# fmt can be "RI" or "dB" to match the file format
+# fmt can be "RI" or "dBang" to match the file format
 # specify column to use for gain (counting 2nd column as 0, frequency is 1st col)
 # (real and imaginary) are grouped as one column for indexing, (dB angle) are grouped as one column also
-def loads2p_generic(f, gain_col, fmt, freq_unit = 'Hz'):
+# 'same' format will leave values as is
+def loads2p_generic(f, data_col, fmt, freq_unit = 'Hz'):
 	freq_prefix = 1
 	freq_col = 0
 	
@@ -96,7 +97,7 @@ def loads2p_generic(f, gain_col, fmt, freq_unit = 'Hz'):
 		freq_prefix = 1e3
 	
 	freq = []
-	gain = []
+	data = []
 	
 	with open(f, 'r', encoding='utf-8') as s2pfile:
 		s2pReader = csv.reader(s2pfile, delimiter=' ', skipinitialspace=True)
@@ -109,10 +110,12 @@ def loads2p_generic(f, gain_col, fmt, freq_unit = 'Hz'):
 				freq.append(float(row[freq_col]))
 				
 				if fmt == 'RI':
-					newdata = float(row[1+gain_col*2]) + 1j*float(row[2+gain_col*2])
-				elif fmt == 'dB':
-					newdata = 10**(float(row[1+gain_col*2])/20) # this ignores the angle
-				gain.append(newdata)
+					newdata = float(row[1+data_col*2]) + 1j*float(row[2+data_col*2])
+				elif fmt == 'dBang':
+					newdata = 10**(float(row[1+data_col*2])/20) # this ignores the angle
+				elif fmt == 'same':
+					newdata = float(row[1+data_col])
+				data.append(newdata)
 				
 		freq = np.array(freq)*freq_prefix/1e6
-		return freq, gain
+		return freq, data
