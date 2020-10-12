@@ -98,11 +98,11 @@ def loads2p_generic(f, data_col, fmt, freq_unit = 'Hz'):
 	
 	freq = []
 	data = []
-	
 	with open(f, 'r', encoding='utf-8') as s2pfile:
 		s2pReader = csv.reader(s2pfile, delimiter=' ', skipinitialspace=True)
-		
 		for row in s2pReader:
+			if len(row) == 1:
+				row = re.split(',', row[0])
 			if len(row) == 1:
 				row = re.split('\s', row[0])	# for weird files that don't use spaces
 			# ignore lines that start with text or comments
@@ -118,4 +118,4 @@ def loads2p_generic(f, data_col, fmt, freq_unit = 'Hz'):
 				data.append(newdata)
 				
 		freq = np.array(freq)*freq_prefix/1e6
-		return freq, data
+		return np.asarray(freq), np.asarray(data)
