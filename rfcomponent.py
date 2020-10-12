@@ -301,6 +301,14 @@ class Chain():
 	@nf.setter
 	def nf(self, value):
 		self.NF = value
+		
+	@property
+	def oip3(self):
+		return self.OIP3
+	
+	@property
+	def iip3(self):
+		return self.IIP3
 
 	
 	def calcCascade(self):
