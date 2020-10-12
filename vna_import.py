@@ -85,7 +85,7 @@ def loads2p(f):
 # specify column to use for gain (counting 2nd column as 0, frequency is 1st col)
 # (real and imaginary) are grouped as one column for indexing, (dB angle) are grouped as one column also
 # 'same' format will leave values as is
-def loads2p_generic(f, data_col, fmt, freq_unit = 'Hz'):
+def loads2p_generic(f, data_col, fmt, freq_unit = 'Hz', skipfirst = False):
 	freq_prefix = 1
 	freq_col = 0
 	
@@ -101,8 +101,13 @@ def loads2p_generic(f, data_col, fmt, freq_unit = 'Hz'):
 	
 	with open(f, 'r', encoding='utf-8') as s2pfile:
 		s2pReader = csv.reader(s2pfile, delimiter=' ', skipinitialspace=True)
-		
+		first = True
 		for row in s2pReader:
+			if first:
+				first = False
+				if skipfirst:
+					continue
+			
 			if len(row) == 1:
 				row = re.split('\s', row[0])	# for weird files that don't use spaces
 			# ignore lines that start with text or comments
